@@ -57,12 +57,6 @@ time_horizon = st.sidebar.selectbox("Agent Strategy Horizon", ["Day Trade (15m/1
 
 run_agents = st.sidebar.button("🚀 Run Agent Committee", use_container_width=True)
 
-# Auto-trigger run if launched from URL parameter
-auto_run = False
-if "ticker" in url_params and "auto_evaluated" not in st.session_state:
-    auto_run = True
-    st.session_state.auto_evaluated = True
-
 # --- Finnhub Data Engine ---
 @st.cache_data(ttl=300)
 def fetch_finnhub_intel(ticker, token):
@@ -111,16 +105,16 @@ def fetch_finnhub_intel(ticker, token):
         pass
     return intel
 
-# --- Technical & Yahoo Finance Data ---
+# --- Reliable Market Data Engine ---
 @st.cache_data(ttl=300)
 def fetch_market_data(ticker):
     try:
-        stock = yf.Ticker(ticker)
-        df = stock.history(period="6mo", interval="1d")
+        df = yf.download(ticker, period="6mo", interval="1d", progress=False)
         if df.empty:
             return None, None
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
         
-        info = stock.info
         df['SMA20'] = df['Close'].rolling(20).mean()
         df['SMA50'] = df['Close'].rolling(50).mean()
         
@@ -132,16 +126,24 @@ def fetch_market_data(ticker):
         
         latest = df.iloc[-1]
         
+        # Optional basic fundamentals with safe failure handling
+        pe_ratio = "N/A"
+        growth = "N/A"
+        try:
+            t = yf.Ticker(ticker)
+            fast_info = getattr(t, "fast_info", {})
+            mkt_cap = fast_info.get("market_cap", "N/A")
+        except Exception:
+            mkt_cap = "N/A"
+
         tech_summary = {
             "current_price": round(float(latest['Close']), 2),
             "sma20": round(float(latest['SMA20']), 2),
             "sma50": round(float(latest['SMA50']), 2),
             "rsi": round(float(latest['RSI']), 2),
-            "market_cap": info.get("marketCap", "N/A"),
-            "pe_ratio": info.get("trailingPE", "N/A"),
-            "forward_pe": info.get("forwardPE", "N/A"),
-            "revenue_growth": info.get("revenueGrowth", "N/A"),
-            "profit_margins": info.get("profitMargins", "N/A")
+            "market_cap": mkt_cap,
+            "pe_ratio": pe_ratio,
+            "revenue_growth": growth
         }
         return df, tech_summary
     except Exception:
@@ -161,7 +163,7 @@ def query_llm(prompt, client, model):
     except Exception as e:
         return f"Error executing agent: {str(e)}"
 
-# --- Layout ---
+# --- Layout Execution ---
 df, stats = fetch_market_data(ticker_input)
 fh_intel = fetch_finnhub_intel(ticker_input, finnhub_key)
 
@@ -174,7 +176,7 @@ if df is not None and stats is not None:
     m3.markdown(f'<div class="agent-card"><div class="metric-lbl">Finnhub Target</div><div class="metric-val">${fh_intel["target_mean"]}</div></div>', unsafe_allow_html=True)
     m4.markdown(f'<div class="agent-card"><div class="metric-lbl">Wall St. Consensus</div><div class="metric-val" style="font-size:1.1rem;">{fh_intel["consensus"]}</div></div>', unsafe_allow_html=True)
 
-    if run_agents or auto_run:
+    if run_agents:
         if not api_key_input:
             st.error("Please provide an OpenAI or OpenRouter API Key in the sidebar.")
         else:
@@ -195,8 +197,7 @@ if df is not None and stats is not None:
                 st.write("📊 **Fundamental Analyst** parsing Finnhub targets & valuation multiples...")
                 prompt_fund = f"""
                 Evaluate the fundamentals and valuation for {ticker_input}:
-                - Trailing P/E: {stats['pe_ratio']} | Forward P/E: {stats['forward_pe']}
-                - Profit Margins: {stats['profit_margins']} | Revenue Growth: {stats['revenue_growth']}
+                - Current Price: ${stats['current_price']}
                 - Finnhub Wall St Consensus Target: ${fh_intel['target_mean']} (High: ${fh_intel['target_high']}, Low: ${fh_intel['target_low']})
                 - Wall St Rating Breakdown: {fh_intel['buy_recs']} Buys, {fh_intel['hold_recs']} Holds, {fh_intel['sell_recs']} Sells
                 Give a sharp assessment of valuation margin of safety. Keep under 110 words.
