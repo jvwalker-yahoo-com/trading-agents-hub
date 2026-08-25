@@ -4,8 +4,6 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
-from openai import OpenAI
 import requests
 
 st.set_page_config(
@@ -36,12 +34,11 @@ st.markdown("""
 openai_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 finnhub_key = st.secrets.get("FINNHUB_API_KEY", os.getenv("FINNHUB_API_KEY", "da02ec1r01qgk75qq5v0da02ec1r01qgk75qq5vg"))
 
-# Auto-read ticker passed via URL Query Params (e.g., ?ticker=AAPL)
 url_params = st.query_params
 initial_ticker = url_params.get("ticker", "NVDA").upper()
 
 # --- Sidebar Configuration ---
-st.sidebar.title("🤖 TradingAgents Hub")
+st.sidebar.title("TradingAgents Hub")
 st.sidebar.caption("Multi-Agent Autonomous Market Intelligence")
 
 api_key_input = st.sidebar.text_input("OpenAI / OpenRouter API Key", value=openai_key, type="password")
@@ -104,7 +101,7 @@ def fetch_finnhub_intel(ticker, token):
         pass
     return intel
 
-# --- Reliable Market Data Engine ---
+# --- Market Data Engine ---
 @st.cache_data(ttl=300)
 def fetch_market_data(ticker):
     try:
@@ -135,13 +132,13 @@ def fetch_market_data(ticker):
     except Exception:
         return None, None
 
+# --- Direct REST LLM Engine (Zero Encoding Quirks) ---
 def query_llm(prompt, key, model_name):
-    # Detect if user provided an OpenRouter key or standard OpenAI key
+    key = str(key).strip()
     is_openrouter = key.startswith("sk-or-")
-    base_endpoint = "https://openrouter.ai/api/v1" if is_openrouter else "https://api.openai.com/v1"
 
-    # Map model name for OpenRouter if needed
     if is_openrouter:
+        url = "https://openrouter.ai/api/v1/chat/completions"
         model_map = {
             "gpt-4o-mini": "openai/gpt-4o-mini",
             "gpt-4o": "openai/gpt-4o",
@@ -149,24 +146,35 @@ def query_llm(prompt, key, model_name):
             "claude-3-5-sonnet": "anthropic/claude-3.5-sonnet"
         }
         actual_model = model_map.get(model_name, "openai/gpt-4o-mini")
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "HTTP-Referer": "https://share.streamlit.io",
+            "X-Title": "TradingAgents Hub",
+            "Content-Type": "application/json"
+        }
     else:
+        url = "https://api.openai.com/v1/chat/completions"
         actual_model = model_name
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json"
+        }
+
+    payload = {
+        "model": actual_model,
+        "messages": [
+            {"role": "system", "content": "You are a senior algorithmic hedge fund researcher orchestrating a multi-agent investment committee."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2
+    }
 
     try:
-        client = OpenAI(
-            api_key=key,
-            base_url=base_endpoint,
-            default_headers={"HTTP-Referer": "https://trading-agents-hub.streamlit.app", "X-Title": "TradingAgents Hub"} if is_openrouter else None
-        )
-        response = client.chat.completions.create(
-            model=actual_model,
-            messages=[
-                {"role": "system", "content": "You are a senior algorithmic hedge fund researcher orchestrating a multi-agent investment committee."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2
-        )
-        return response.choices[0].message.content
+        res = requests.post(url, headers=headers, json=payload, timeout=45)
+        if res.status_code != 200:
+            return f"API Error ({res.status_code}): {res.text}"
+        data = res.json()
+        return data["choices"][0]["message"]["content"]
     except Exception as e:
         return f"Error executing agent: {str(e)}"
 
