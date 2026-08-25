@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="TradingAgents Hub",
     page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # Dark styling matching the terminal design
@@ -30,19 +30,21 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# API Keys setup (Pulls permanent secrets first, with hardcoded OpenRouter fallback)
-DEFAULT_OPENROUTER_KEY = "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"
-api_secret = st.secrets.get("OPENROUTER_API_KEY", st.secrets.get("OPENAI_API_KEY", os.getenv("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_KEY)))
-finnhub_key = st.secrets.get("FINNHUB_API_KEY", os.getenv("FINNHUB_API_KEY", "da02ec1r01qgk75qq5v0da02ec1r01qgk75qq5vg"))
+# Default permanent credentials
+DEFAULT_KEY = "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"
+DEFAULT_FINNHUB = "da02ec1r01qgk75qq5v0da02ec1r01qgk75qq5vg"
 
+api_secret = st.secrets.get("OPENROUTER_API_KEY", st.secrets.get("OPENAI_API_KEY", os.getenv("OPENROUTER_API_KEY", DEFAULT_KEY)))
+finnhub_key = st.secrets.get("FINNHUB_API_KEY", os.getenv("FINNHUB_API_KEY", DEFAULT_FINNHUB))
+
+# Automatically parse ticker passed via URL
 url_params = st.query_params
-initial_ticker = url_params.get("ticker", "NVDA").upper()
+ticker_input = url_params.get("ticker", "AMD").upper().strip()
 
-# --- Sidebar Configuration ---
+# --- Clean Minimalist Sidebar ---
 st.sidebar.title("TradingAgents Hub")
 st.sidebar.caption("Multi-Agent Autonomous Market Intelligence")
 
-api_key_input = st.sidebar.text_input("OpenRouter / OpenAI API Key", value=api_secret, type="password")
 model_choice = st.sidebar.selectbox(
     "LLM Engine",
     [
@@ -56,10 +58,8 @@ model_choice = st.sidebar.selectbox(
     index=0
 )
 
-ticker_input = st.sidebar.text_input("Asset Ticker", value=initial_ticker).upper().strip()
 time_horizon = st.sidebar.selectbox("Agent Strategy Horizon", ["Day Trade (15m/1h)", "Swing Trade (Daily)", "Position (Macro)"], index=1)
-
-run_button = st.sidebar.button("🔄 Re-Run Committee", use_container_width=True)
+st.sidebar.button("🔄 Re-Run Committee", use_container_width=True)
 
 # --- Finnhub Data Engine ---
 @st.cache_data(ttl=300)
@@ -202,8 +202,8 @@ if df is not None and stats is not None:
     m3.markdown(f'<div class="agent-card"><div class="metric-lbl">Finnhub Target</div><div class="metric-val">${fh_intel["target_mean"]}</div></div>', unsafe_allow_html=True)
     m4.markdown(f'<div class="agent-card"><div class="metric-lbl">Wall St. Consensus</div><div class="metric-val" style="font-size:1.1rem;">{fh_intel["consensus"]}</div></div>', unsafe_allow_html=True)
 
-    # Automatically execute deliberation
-    if api_key_input:
+    # Automatically run deliberation using the active API key
+    if api_secret:
         st.markdown("### 🏛️ Autonomous Agent Deliberation")
         
         with st.status("Executing Agent Committee Workflow...", expanded=True) as status:
@@ -215,7 +215,7 @@ if df is not None and stats is not None:
             - RSI: {stats['rsi']}
             Provide key support/resistance levels, trend health, and immediate entry bias. Keep under 90 words.
             """
-            tech_report = query_llm(prompt_tech, api_key_input, model_choice, max_tokens=220)
+            tech_report = query_llm(prompt_tech, api_secret, model_choice, max_tokens=220)
 
             st.write("📊 **Fundamental Analyst** parsing Finnhub targets & valuation multiples...")
             prompt_fund = f"""
@@ -225,7 +225,7 @@ if df is not None and stats is not None:
             - Wall St Rating Breakdown: {fh_intel['buy_recs']} Buys, {fh_intel['hold_recs']} Holds, {fh_intel['sell_recs']} Sells
             Give a sharp assessment of valuation margin of safety. Keep under 90 words.
             """
-            fund_report = query_llm(prompt_fund, api_key_input, model_choice, max_tokens=220)
+            fund_report = query_llm(prompt_fund, api_secret, model_choice, max_tokens=220)
 
             st.write("🌐 **Sentiment & Insider Agent** analyzing Finnhub executive transactions & macro drivers...")
             prompt_sent = f"""
@@ -234,7 +234,7 @@ if df is not None and stats is not None:
             - Wall St Recommendation Consensus: {fh_intel['consensus']}
             Identify 2 primary upside catalysts and 2 critical tail-risk threats. Keep under 90 words.
             """
-            sent_report = query_llm(prompt_sent, api_key_input, model_choice, max_tokens=220)
+            sent_report = query_llm(prompt_sent, api_secret, model_choice, max_tokens=220)
 
             st.write("⚖️ **Chief Risk Officer** adjudicating setup, invalidation & position sizing...")
             prompt_cro = f"""
@@ -252,7 +252,7 @@ if df is not None and stats is not None:
             - RISK SIZING: [Recommended capital risk % / leverage guideline]
             - COMMITTEE RATIONALE: [2 punchy sentences summarizing the core trade thesis]
             """
-            cro_verdict = query_llm(prompt_cro, api_key_input, model_choice, max_tokens=320)
+            cro_verdict = query_llm(prompt_cro, api_secret, model_choice, max_tokens=320)
             status.update(label="Committee Deliberation Complete!", state="complete", expanded=False)
 
         col_a, col_b = st.columns(2)
@@ -295,6 +295,6 @@ if df is not None and stats is not None:
         </div>
         """, unsafe_allow_html=True)
     else:
-        st.error("Please provide an OpenRouter or OpenAI API Key in the sidebar or save it in Streamlit Secrets.")
+        st.error("No API key configured.")
 else:
     st.error(f"Could not retrieve market data for '{ticker_input}'. Please check the symbol.")
