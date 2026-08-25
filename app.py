@@ -35,7 +35,6 @@ st.markdown("""
 # API Keys setup
 openai_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 finnhub_key = st.secrets.get("FINNHUB_API_KEY", os.getenv("FINNHUB_API_KEY", "da02ec1r01qgk75qq5v0da02ec1r01qgk75qq5vg"))
-base_url = st.secrets.get("OPENAI_BASE_URL", os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
 
 # Auto-read ticker passed via URL Query Params (e.g., ?ticker=AAPL)
 url_params = st.query_params
@@ -126,35 +125,43 @@ def fetch_market_data(ticker):
         
         latest = df.iloc[-1]
         
-        # Optional basic fundamentals with safe failure handling
-        pe_ratio = "N/A"
-        growth = "N/A"
-        try:
-            t = yf.Ticker(ticker)
-            fast_info = getattr(t, "fast_info", {})
-            mkt_cap = fast_info.get("market_cap", "N/A")
-        except Exception:
-            mkt_cap = "N/A"
-
         tech_summary = {
             "current_price": round(float(latest['Close']), 2),
             "sma20": round(float(latest['SMA20']), 2),
             "sma50": round(float(latest['SMA50']), 2),
-            "rsi": round(float(latest['RSI']), 2),
-            "market_cap": mkt_cap,
-            "pe_ratio": pe_ratio,
-            "revenue_growth": growth
+            "rsi": round(float(latest['RSI']), 2)
         }
         return df, tech_summary
     except Exception:
         return None, None
 
-def query_llm(prompt, client, model):
+def query_llm(prompt, key, model_name):
+    # Detect if user provided an OpenRouter key or standard OpenAI key
+    is_openrouter = key.startswith("sk-or-")
+    base_endpoint = "https://openrouter.ai/api/v1" if is_openrouter else "https://api.openai.com/v1"
+
+    # Map model name for OpenRouter if needed
+    if is_openrouter:
+        model_map = {
+            "gpt-4o-mini": "openai/gpt-4o-mini",
+            "gpt-4o": "openai/gpt-4o",
+            "deepseek-chat": "deepseek/deepseek-chat",
+            "claude-3-5-sonnet": "anthropic/claude-3.5-sonnet"
+        }
+        actual_model = model_map.get(model_name, "openai/gpt-4o-mini")
+    else:
+        actual_model = model_name
+
     try:
+        client = OpenAI(
+            api_key=key,
+            base_url=base_endpoint,
+            default_headers={"HTTP-Referer": "https://trading-agents-hub.streamlit.app", "X-Title": "TradingAgents Hub"} if is_openrouter else None
+        )
         response = client.chat.completions.create(
-            model=model,
+            model=actual_model,
             messages=[
-                {"role": "system", "content": "You are a hedge fund intelligence engine leading an autonomous multi-agent quantitative committee."},
+                {"role": "system", "content": "You are a senior algorithmic hedge fund researcher orchestrating a multi-agent investment committee."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.2
@@ -180,7 +187,6 @@ if df is not None and stats is not None:
         if not api_key_input:
             st.error("Please provide an OpenAI or OpenRouter API Key in the sidebar.")
         else:
-            client = OpenAI(api_key=api_key_input, base_url=base_url)
             st.markdown("### 🏛️ Autonomous Agent Deliberation")
             
             with st.status("Executing Agent Committee Workflow...", expanded=True) as status:
@@ -192,7 +198,7 @@ if df is not None and stats is not None:
                 - RSI: {stats['rsi']}
                 Provide key support/resistance levels, trend health, and immediate entry bias. Keep under 110 words.
                 """
-                tech_report = query_llm(prompt_tech, client, model_choice)
+                tech_report = query_llm(prompt_tech, api_key_input, model_choice)
 
                 st.write("📊 **Fundamental Analyst** parsing Finnhub targets & valuation multiples...")
                 prompt_fund = f"""
@@ -202,7 +208,7 @@ if df is not None and stats is not None:
                 - Wall St Rating Breakdown: {fh_intel['buy_recs']} Buys, {fh_intel['hold_recs']} Holds, {fh_intel['sell_recs']} Sells
                 Give a sharp assessment of valuation margin of safety. Keep under 110 words.
                 """
-                fund_report = query_llm(prompt_fund, client, model_choice)
+                fund_report = query_llm(prompt_fund, api_key_input, model_choice)
 
                 st.write("🌐 **Sentiment & Insider Agent** analyzing Finnhub executive transactions & macro drivers...")
                 prompt_sent = f"""
@@ -211,7 +217,7 @@ if df is not None and stats is not None:
                 - Wall St Recommendation Consensus: {fh_intel['consensus']}
                 Identify 2 primary upside catalysts and 2 critical tail-risk threats. Keep under 100 words.
                 """
-                sent_report = query_llm(prompt_sent, client, model_choice)
+                sent_report = query_llm(prompt_sent, api_key_input, model_choice)
 
                 st.write("⚖️ **Chief Risk Officer** adjudicating setup, invalidation & position sizing...")
                 prompt_cro = f"""
@@ -229,7 +235,7 @@ if df is not None and stats is not None:
                 - RISK SIZING: [Recommended capital risk % / leverage guideline]
                 - COMMITTEE RATIONALE: [2 punchy sentences summarizing the core trade thesis]
                 """
-                cro_verdict = query_llm(prompt_cro, client, model_choice)
+                cro_verdict = query_llm(prompt_cro, api_key_input, model_choice)
                 status.update(label="Committee Deliberation Complete!", state="complete", expanded=False)
 
             col_a, col_b = st.columns(2)
