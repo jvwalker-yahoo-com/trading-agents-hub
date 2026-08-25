@@ -44,7 +44,14 @@ st.sidebar.caption("Multi-Agent Autonomous Market Intelligence")
 api_key_input = st.sidebar.text_input("OpenAI / OpenRouter API Key", value=openai_key, type="password")
 model_choice = st.sidebar.selectbox(
     "LLM Engine",
-    ["gpt-4o-mini", "gpt-4o", "deepseek-chat", "claude-3-5-sonnet"],
+    [
+        "gpt-4o-mini",
+        "deepseek-chat",
+        "gemini-2.0-flash (Free/Low Cost)",
+        "meta-llama-3.3-70b (Free/Low Cost)",
+        "gpt-4o",
+        "claude-3-5-sonnet"
+    ],
     index=0
 )
 
@@ -132,8 +139,8 @@ def fetch_market_data(ticker):
     except Exception:
         return None, None
 
-# --- Direct REST LLM Engine (Zero Encoding Quirks) ---
-def query_llm(prompt, key, model_name):
+# --- Low-Cost / Free-Tier Direct REST LLM Engine ---
+def query_llm(prompt, key, model_name, max_tokens=350):
     key = str(key).strip()
     is_openrouter = key.startswith("sk-or-")
 
@@ -141,8 +148,10 @@ def query_llm(prompt, key, model_name):
         url = "https://openrouter.ai/api/v1/chat/completions"
         model_map = {
             "gpt-4o-mini": "openai/gpt-4o-mini",
-            "gpt-4o": "openai/gpt-4o",
             "deepseek-chat": "deepseek/deepseek-chat",
+            "gemini-2.0-flash (Free/Low Cost)": "google/gemini-2.0-flash-001",
+            "meta-llama-3.3-70b (Free/Low Cost)": "meta-llama/llama-3.3-70b-instruct:free",
+            "gpt-4o": "openai/gpt-4o",
             "claude-3-5-sonnet": "anthropic/claude-3.5-sonnet"
         }
         actual_model = model_map.get(model_name, "openai/gpt-4o-mini")
@@ -154,7 +163,7 @@ def query_llm(prompt, key, model_name):
         }
     else:
         url = "https://api.openai.com/v1/chat/completions"
-        actual_model = model_name
+        actual_model = model_name.split()[0]
         headers = {
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json"
@@ -163,14 +172,15 @@ def query_llm(prompt, key, model_name):
     payload = {
         "model": actual_model,
         "messages": [
-            {"role": "system", "content": "You are a senior algorithmic hedge fund researcher orchestrating a multi-agent investment committee."},
+            {"role": "system", "content": "You are a quantitative researcher leading an autonomous multi-agent investment committee. Keep assessments concise, structural, and factual."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.2
+        "temperature": 0.2,
+        "max_tokens": max_tokens
     }
 
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=45)
+        res = requests.post(url, headers=headers, json=payload, timeout=40)
         if res.status_code != 200:
             return f"API Error ({res.status_code}): {res.text}"
         data = res.json()
@@ -204,9 +214,9 @@ if df is not None and stats is not None:
                 - Current Price: ${stats['current_price']}
                 - 20 SMA: ${stats['sma20']} | 50 SMA: ${stats['sma50']}
                 - RSI: {stats['rsi']}
-                Provide key support/resistance levels, trend health, and immediate entry bias. Keep under 110 words.
+                Provide key support/resistance levels, trend health, and immediate entry bias. Keep under 90 words.
                 """
-                tech_report = query_llm(prompt_tech, api_key_input, model_choice)
+                tech_report = query_llm(prompt_tech, api_key_input, model_choice, max_tokens=220)
 
                 st.write("📊 **Fundamental Analyst** parsing Finnhub targets & valuation multiples...")
                 prompt_fund = f"""
@@ -214,18 +224,18 @@ if df is not None and stats is not None:
                 - Current Price: ${stats['current_price']}
                 - Finnhub Wall St Consensus Target: ${fh_intel['target_mean']} (High: ${fh_intel['target_high']}, Low: ${fh_intel['target_low']})
                 - Wall St Rating Breakdown: {fh_intel['buy_recs']} Buys, {fh_intel['hold_recs']} Holds, {fh_intel['sell_recs']} Sells
-                Give a sharp assessment of valuation margin of safety. Keep under 110 words.
+                Give a sharp assessment of valuation margin of safety. Keep under 90 words.
                 """
-                fund_report = query_llm(prompt_fund, api_key_input, model_choice)
+                fund_report = query_llm(prompt_fund, api_key_input, model_choice, max_tokens=220)
 
                 st.write("🌐 **Sentiment & Insider Agent** analyzing Finnhub executive transactions & macro drivers...")
                 prompt_sent = f"""
                 Review market sentiment and executive insider signals for {ticker_input}:
                 - Finnhub Insider Sentiment Status: {fh_intel['insider_bias']}
                 - Wall St Recommendation Consensus: {fh_intel['consensus']}
-                Identify 2 primary upside catalysts and 2 critical tail-risk threats. Keep under 100 words.
+                Identify 2 primary upside catalysts and 2 critical tail-risk threats. Keep under 90 words.
                 """
-                sent_report = query_llm(prompt_sent, api_key_input, model_choice)
+                sent_report = query_llm(prompt_sent, api_key_input, model_choice, max_tokens=220)
 
                 st.write("⚖️ **Chief Risk Officer** adjudicating setup, invalidation & position sizing...")
                 prompt_cro = f"""
@@ -243,7 +253,7 @@ if df is not None and stats is not None:
                 - RISK SIZING: [Recommended capital risk % / leverage guideline]
                 - COMMITTEE RATIONALE: [2 punchy sentences summarizing the core trade thesis]
                 """
-                cro_verdict = query_llm(prompt_cro, api_key_input, model_choice)
+                cro_verdict = query_llm(prompt_cro, api_key_input, model_choice, max_tokens=320)
                 status.update(label="Committee Deliberation Complete!", state="complete", expanded=False)
 
             col_a, col_b = st.columns(2)
