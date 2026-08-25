@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Dark styling matching the agent terminal design
+# Dark styling matching the terminal design
 st.markdown("""
 <style>
     .reportview-container, .main, .block-container { background-color: #0b0e14; color: #f0f2f6; }
@@ -30,8 +30,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# API Keys setup
-openai_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
+# API Keys setup (Pulls permanent secrets first, with hardcoded OpenRouter fallback)
+DEFAULT_OPENROUTER_KEY = "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"
+api_secret = st.secrets.get("OPENROUTER_API_KEY", st.secrets.get("OPENAI_API_KEY", os.getenv("OPENROUTER_API_KEY", DEFAULT_OPENROUTER_KEY)))
 finnhub_key = st.secrets.get("FINNHUB_API_KEY", os.getenv("FINNHUB_API_KEY", "da02ec1r01qgk75qq5v0da02ec1r01qgk75qq5vg"))
 
 url_params = st.query_params
@@ -41,7 +42,7 @@ initial_ticker = url_params.get("ticker", "NVDA").upper()
 st.sidebar.title("TradingAgents Hub")
 st.sidebar.caption("Multi-Agent Autonomous Market Intelligence")
 
-api_key_input = st.sidebar.text_input("OpenAI / OpenRouter API Key", value=openai_key, type="password")
+api_key_input = st.sidebar.text_input("OpenRouter / OpenAI API Key", value=api_secret, type="password")
 model_choice = st.sidebar.selectbox(
     "LLM Engine",
     [
@@ -58,7 +59,7 @@ model_choice = st.sidebar.selectbox(
 ticker_input = st.sidebar.text_input("Asset Ticker", value=initial_ticker).upper().strip()
 time_horizon = st.sidebar.selectbox("Agent Strategy Horizon", ["Day Trade (15m/1h)", "Swing Trade (Daily)", "Position (Macro)"], index=1)
 
-run_agents = st.sidebar.button("🚀 Run Agent Committee", use_container_width=True)
+run_button = st.sidebar.button("🔄 Re-Run Committee", use_container_width=True)
 
 # --- Finnhub Data Engine ---
 @st.cache_data(ttl=300)
@@ -139,7 +140,7 @@ def fetch_market_data(ticker):
     except Exception:
         return None, None
 
-# --- Low-Cost / Free-Tier Direct REST LLM Engine ---
+# --- Direct REST LLM Engine ---
 def query_llm(prompt, key, model_name, max_tokens=350):
     key = str(key).strip()
     is_openrouter = key.startswith("sk-or-")
@@ -201,101 +202,99 @@ if df is not None and stats is not None:
     m3.markdown(f'<div class="agent-card"><div class="metric-lbl">Finnhub Target</div><div class="metric-val">${fh_intel["target_mean"]}</div></div>', unsafe_allow_html=True)
     m4.markdown(f'<div class="agent-card"><div class="metric-lbl">Wall St. Consensus</div><div class="metric-val" style="font-size:1.1rem;">{fh_intel["consensus"]}</div></div>', unsafe_allow_html=True)
 
-    if run_agents:
-        if not api_key_input:
-            st.error("Please provide an OpenAI or OpenRouter API Key in the sidebar.")
-        else:
-            st.markdown("### 🏛️ Autonomous Agent Deliberation")
-            
-            with st.status("Executing Agent Committee Workflow...", expanded=True) as status:
-                st.write("📈 **Technical Strategist** evaluating price action & moving averages...")
-                prompt_tech = f"""
-                Analyze the technical setup for {ticker_input} (Horizon: {time_horizon}):
-                - Current Price: ${stats['current_price']}
-                - 20 SMA: ${stats['sma20']} | 50 SMA: ${stats['sma50']}
-                - RSI: {stats['rsi']}
-                Provide key support/resistance levels, trend health, and immediate entry bias. Keep under 90 words.
-                """
-                tech_report = query_llm(prompt_tech, api_key_input, model_choice, max_tokens=220)
+    # Automatically execute deliberation
+    if api_key_input:
+        st.markdown("### 🏛️ Autonomous Agent Deliberation")
+        
+        with st.status("Executing Agent Committee Workflow...", expanded=True) as status:
+            st.write("📈 **Technical Strategist** evaluating price action & moving averages...")
+            prompt_tech = f"""
+            Analyze the technical setup for {ticker_input} (Horizon: {time_horizon}):
+            - Current Price: ${stats['current_price']}
+            - 20 SMA: ${stats['sma20']} | 50 SMA: ${stats['sma50']}
+            - RSI: {stats['rsi']}
+            Provide key support/resistance levels, trend health, and immediate entry bias. Keep under 90 words.
+            """
+            tech_report = query_llm(prompt_tech, api_key_input, model_choice, max_tokens=220)
 
-                st.write("📊 **Fundamental Analyst** parsing Finnhub targets & valuation multiples...")
-                prompt_fund = f"""
-                Evaluate the fundamentals and valuation for {ticker_input}:
-                - Current Price: ${stats['current_price']}
-                - Finnhub Wall St Consensus Target: ${fh_intel['target_mean']} (High: ${fh_intel['target_high']}, Low: ${fh_intel['target_low']})
-                - Wall St Rating Breakdown: {fh_intel['buy_recs']} Buys, {fh_intel['hold_recs']} Holds, {fh_intel['sell_recs']} Sells
-                Give a sharp assessment of valuation margin of safety. Keep under 90 words.
-                """
-                fund_report = query_llm(prompt_fund, api_key_input, model_choice, max_tokens=220)
+            st.write("📊 **Fundamental Analyst** parsing Finnhub targets & valuation multiples...")
+            prompt_fund = f"""
+            Evaluate the fundamentals and valuation for {ticker_input}:
+            - Current Price: ${stats['current_price']}
+            - Finnhub Wall St Consensus Target: ${fh_intel['target_mean']} (High: ${fh_intel['target_high']}, Low: ${fh_intel['target_low']})
+            - Wall St Rating Breakdown: {fh_intel['buy_recs']} Buys, {fh_intel['hold_recs']} Holds, {fh_intel['sell_recs']} Sells
+            Give a sharp assessment of valuation margin of safety. Keep under 90 words.
+            """
+            fund_report = query_llm(prompt_fund, api_key_input, model_choice, max_tokens=220)
 
-                st.write("🌐 **Sentiment & Insider Agent** analyzing Finnhub executive transactions & macro drivers...")
-                prompt_sent = f"""
-                Review market sentiment and executive insider signals for {ticker_input}:
-                - Finnhub Insider Sentiment Status: {fh_intel['insider_bias']}
-                - Wall St Recommendation Consensus: {fh_intel['consensus']}
-                Identify 2 primary upside catalysts and 2 critical tail-risk threats. Keep under 90 words.
-                """
-                sent_report = query_llm(prompt_sent, api_key_input, model_choice, max_tokens=220)
+            st.write("🌐 **Sentiment & Insider Agent** analyzing Finnhub executive transactions & macro drivers...")
+            prompt_sent = f"""
+            Review market sentiment and executive insider signals for {ticker_input}:
+            - Finnhub Insider Sentiment Status: {fh_intel['insider_bias']}
+            - Wall St Recommendation Consensus: {fh_intel['consensus']}
+            Identify 2 primary upside catalysts and 2 critical tail-risk threats. Keep under 90 words.
+            """
+            sent_report = query_llm(prompt_sent, api_key_input, model_choice, max_tokens=220)
 
-                st.write("⚖️ **Chief Risk Officer** adjudicating setup, invalidation & position sizing...")
-                prompt_cro = f"""
-                You are the Chief Risk Officer. Adjudicate the committee findings for {ticker_input} (Price: ${stats['current_price']}):
-                TECHNICALS: {tech_report}
-                FUNDAMENTALS & FINNHUB TARGET: {fund_report}
-                SENTIMENT & INSIDER FLOW: {sent_report}
+            st.write("⚖️ **Chief Risk Officer** adjudicating setup, invalidation & position sizing...")
+            prompt_cro = f"""
+            You are the Chief Risk Officer. Adjudicate the committee findings for {ticker_input} (Price: ${stats['current_price']}):
+            TECHNICALS: {tech_report}
+            FUNDAMENTALS & FINNHUB TARGET: {fund_report}
+            SENTIMENT & INSIDER FLOW: {sent_report}
 
-                Deliver the final execution mandate in this exact structured format:
-                - FINAL ACTION: [STRONG BUY / BUY / HOLD / SELL / STRONG SELL]
-                - CONVICTION SCORE: [1-10]
-                - ENTRY ZONE: [Price range]
-                - STOP LOSS: [Hard invalidation price]
-                - TARGET OBJECTIVE: [Take-profit price]
-                - RISK SIZING: [Recommended capital risk % / leverage guideline]
-                - COMMITTEE RATIONALE: [2 punchy sentences summarizing the core trade thesis]
-                """
-                cro_verdict = query_llm(prompt_cro, api_key_input, model_choice, max_tokens=320)
-                status.update(label="Committee Deliberation Complete!", state="complete", expanded=False)
+            Deliver the final execution mandate in this exact structured format:
+            - FINAL ACTION: [STRONG BUY / BUY / HOLD / SELL / STRONG SELL]
+            - CONVICTION SCORE: [1-10]
+            - ENTRY ZONE: [Price range]
+            - STOP LOSS: [Hard invalidation price]
+            - TARGET OBJECTIVE: [Take-profit price]
+            - RISK SIZING: [Recommended capital risk % / leverage guideline]
+            - COMMITTEE RATIONALE: [2 punchy sentences summarizing the core trade thesis]
+            """
+            cro_verdict = query_llm(prompt_cro, api_key_input, model_choice, max_tokens=320)
+            status.update(label="Committee Deliberation Complete!", state="complete", expanded=False)
 
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.markdown(f"""
-                <div class="agent-card">
-                    <div class="agent-header agent-title-blue">📈 Technical Strategist</div>
-                    <div style="font-size: 0.9rem; color: #e2e8f0;">{tech_report}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                st.markdown(f"""
-                <div class="agent-card">
-                    <div class="agent-header agent-title-green">📊 Fundamental Analyst (Finnhub Data)</div>
-                    <div style="font-size: 0.9rem; color: #e2e8f0;">{fund_report}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-            with col_b:
-                st.markdown(f"""
-                <div class="agent-card">
-                    <div class="agent-header agent-title-purple">🌐 Sentiment & Insider Agent (Finnhub MSPR)</div>
-                    <div style="font-size: 0.9rem; color: #e2e8f0;">{sent_report}</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                st.markdown(f"""
-                <div class="agent-card">
-                    <div class="agent-header agent-title-orange">⚖️ Committee Consensus</div>
-                    <div style="font-size: 0.85rem; color: #94a3b8;">Aggregated quantitative technicals, Finnhub analyst estimates, and insider flow metrics.</div>
-                </div>
-                """, unsafe_allow_html=True)
-
-            st.markdown("### 🎯 Chief Risk Officer (Execution Mandate)")
+        col_a, col_b = st.columns(2)
+        with col_a:
             st.markdown(f"""
-            <div class="verdict-box">
-                <div style="white-space: pre-line; font-size: 0.95rem; color: #f8fafc; line-height: 1.6;">
-                {cro_verdict}
-                </div>
+            <div class="agent-card">
+                <div class="agent-header agent-title-blue">📈 Technical Strategist</div>
+                <div style="font-size: 0.9rem; color: #e2e8f0;">{tech_report}</div>
             </div>
             """, unsafe_allow_html=True)
+            
+            st.markdown(f"""
+            <div class="agent-card">
+                <div class="agent-header agent-title-green">📊 Fundamental Analyst (Finnhub Data)</div>
+                <div style="font-size: 0.9rem; color: #e2e8f0;">{fund_report}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col_b:
+            st.markdown(f"""
+            <div class="agent-card">
+                <div class="agent-header agent-title-purple">🌐 Sentiment & Insider Agent (Finnhub MSPR)</div>
+                <div style="font-size: 0.9rem; color: #e2e8f0;">{sent_report}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown(f"""
+            <div class="agent-card">
+                <div class="agent-header agent-title-orange">⚖️ Committee Consensus</div>
+                <div style="font-size: 0.85rem; color: #94a3b8;">Aggregated quantitative technicals, Finnhub analyst estimates, and insider flow metrics.</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("### 🎯 Chief Risk Officer (Execution Mandate)")
+        st.markdown(f"""
+        <div class="verdict-box">
+            <div style="white-space: pre-line; font-size: 0.95rem; color: #f8fafc; line-height: 1.6;">
+            {cro_verdict}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        st.info("👈 Set your strategy horizon and click **Run Agent Committee** in the sidebar to begin autonomous analysis.")
+        st.error("Please provide an OpenRouter or OpenAI API Key in the sidebar or save it in Streamlit Secrets.")
 else:
     st.error(f"Could not retrieve market data for '{ticker_input}'. Please check the symbol.")
