@@ -37,6 +37,10 @@ openai_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 finnhub_key = st.secrets.get("FINNHUB_API_KEY", os.getenv("FINNHUB_API_KEY", "da02ec1r01qgk75qq5v0da02ec1r01qgk75qq5vg"))
 base_url = st.secrets.get("OPENAI_BASE_URL", os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
 
+# Auto-read ticker passed via URL Query Params (e.g., ?ticker=AAPL)
+url_params = st.query_params
+initial_ticker = url_params.get("ticker", "NVDA").upper()
+
 # --- Sidebar Configuration ---
 st.sidebar.title("🤖 TradingAgents Hub")
 st.sidebar.caption("Multi-Agent Autonomous Market Intelligence")
@@ -48,10 +52,16 @@ model_choice = st.sidebar.selectbox(
     index=0
 )
 
-ticker_input = st.sidebar.text_input("Asset Ticker", value="NVDA").upper().strip()
+ticker_input = st.sidebar.text_input("Asset Ticker", value=initial_ticker).upper().strip()
 time_horizon = st.sidebar.selectbox("Agent Strategy Horizon", ["Day Trade (15m/1h)", "Swing Trade (Daily)", "Position (Macro)"], index=1)
 
 run_agents = st.sidebar.button("🚀 Run Agent Committee", use_container_width=True)
+
+# Auto-trigger run if launched from URL parameter
+auto_run = False
+if "ticker" in url_params and "auto_evaluated" not in st.session_state:
+    auto_run = True
+    st.session_state.auto_evaluated = True
 
 # --- Finnhub Data Engine ---
 @st.cache_data(ttl=300)
@@ -65,7 +75,6 @@ def fetch_finnhub_intel(ticker, token):
         return intel
 
     try:
-        # 1. Price Target
         url_pt = f"https://finnhub.io/api/v1/stock/price-target?symbol={ticker}&token={token}"
         r_pt = requests.get(url_pt, timeout=4).json()
         if r_pt and r_pt.get("targetMean"):
@@ -73,7 +82,6 @@ def fetch_finnhub_intel(ticker, token):
             intel["target_high"] = round(float(r_pt.get("targetHigh", 0)), 2)
             intel["target_low"] = round(float(r_pt.get("targetLow", 0)), 2)
 
-        # 2. Recommendations
         url_rec = f"https://finnhub.io/api/v1/stock/recommendation?symbol={ticker}&token={token}"
         r_rec = requests.get(url_rec, timeout=4).json()
         if isinstance(r_rec, list) and len(r_rec) > 0:
@@ -89,7 +97,6 @@ def fetch_finnhub_intel(ticker, token):
             else:
                 intel["consensus"] = "Hold / Neutral"
 
-        # 3. Insider Sentiment
         url_ins = f"https://finnhub.io/api/v1/stock/insider-sentiment?symbol={ticker}&from=2025-01-01&token={token}"
         r_ins = requests.get(url_ins, timeout=4).json()
         if r_ins and r_ins.get("data") and len(r_ins["data"]) > 0:
@@ -114,7 +121,6 @@ def fetch_market_data(ticker):
             return None, None
         
         info = stock.info
-        
         df['SMA20'] = df['Close'].rolling(20).mean()
         df['SMA50'] = df['Close'].rolling(50).mean()
         
@@ -168,7 +174,7 @@ if df is not None and stats is not None:
     m3.markdown(f'<div class="agent-card"><div class="metric-lbl">Finnhub Target</div><div class="metric-val">${fh_intel["target_mean"]}</div></div>', unsafe_allow_html=True)
     m4.markdown(f'<div class="agent-card"><div class="metric-lbl">Wall St. Consensus</div><div class="metric-val" style="font-size:1.1rem;">{fh_intel["consensus"]}</div></div>', unsafe_allow_html=True)
 
-    if run_agents:
+    if run_agents or auto_run:
         if not api_key_input:
             st.error("Please provide an OpenAI or OpenRouter API Key in the sidebar.")
         else:
@@ -176,7 +182,6 @@ if df is not None and stats is not None:
             st.markdown("### 🏛️ Autonomous Agent Deliberation")
             
             with st.status("Executing Agent Committee Workflow...", expanded=True) as status:
-                # Agent 1: Technical Strategist
                 st.write("📈 **Technical Strategist** evaluating price action & moving averages...")
                 prompt_tech = f"""
                 Analyze the technical setup for {ticker_input} (Horizon: {time_horizon}):
@@ -187,7 +192,6 @@ if df is not None and stats is not None:
                 """
                 tech_report = query_llm(prompt_tech, client, model_choice)
 
-                # Agent 2: Fundamental & Valuation Analyst (With Finnhub Data)
                 st.write("📊 **Fundamental Analyst** parsing Finnhub targets & valuation multiples...")
                 prompt_fund = f"""
                 Evaluate the fundamentals and valuation for {ticker_input}:
@@ -199,7 +203,6 @@ if df is not None and stats is not None:
                 """
                 fund_report = query_llm(prompt_fund, client, model_choice)
 
-                # Agent 3: Sentiment & Insider Agent (With Finnhub Data)
                 st.write("🌐 **Sentiment & Insider Agent** analyzing Finnhub executive transactions & macro drivers...")
                 prompt_sent = f"""
                 Review market sentiment and executive insider signals for {ticker_input}:
@@ -209,7 +212,6 @@ if df is not None and stats is not None:
                 """
                 sent_report = query_llm(prompt_sent, client, model_choice)
 
-                # Agent 4: Chief Risk Officer (Final Committee Decision)
                 st.write("⚖️ **Chief Risk Officer** adjudicating setup, invalidation & position sizing...")
                 prompt_cro = f"""
                 You are the Chief Risk Officer. Adjudicate the committee findings for {ticker_input} (Price: ${stats['current_price']}):
@@ -229,7 +231,6 @@ if df is not None and stats is not None:
                 cro_verdict = query_llm(prompt_cro, client, model_choice)
                 status.update(label="Committee Deliberation Complete!", state="complete", expanded=False)
 
-            # Display Agent Outputs
             col_a, col_b = st.columns(2)
             with col_a:
                 st.markdown(f"""
@@ -261,7 +262,6 @@ if df is not None and stats is not None:
                 </div>
                 """, unsafe_allow_html=True)
 
-            # Final CRO Card
             st.markdown("### 🎯 Chief Risk Officer (Execution Mandate)")
             st.markdown(f"""
             <div class="verdict-box">
