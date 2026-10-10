@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: etoro-trading-bot
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "streamlit run streamlit_app.py --server.port $PORT --server.address 0.0.0.0 --server.enableCORS false --server.enableXsrfProtection false"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: FINNHUB_API_KEY
+        value: "db402p9r01qucqgihnrgdb402p9r01qucqgihns0"
+      - key: ALPHA_VANTAGE_API_KEY
+        value: "P3I4HA7S9JQHFL8X"

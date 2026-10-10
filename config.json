@@ -1,0 +1,16 @@
+{
+  "public_key": "sdgdskldFPLGfjHn1421dgnlxdGTbngdflg6290bRjslfihsjhSDsdgGHH25hjf",
+  "api_key": "eyJjaSI6IjYwY2FiYjBiLTU1OTctNDQ4NS04ZjYzLTdlOWUwNTZlMGJiOCIsImVhbiI6IlVucmVnaXN0ZXJlZEFwcGxpY2F0aW9uIiwiZWsiOiJsOVpadEN4OHNUWUJSd0UwN0thOG5TUlBJUHlUSVNPLTBHOExGNWpOT3RrSTJqWGFnekZHajNOY2RtdlgudlltR3VoZkpyb3JvMU5rWm9VZ281WVVWRVI2aDA5dkZFa250QU9oMUF6S3ZwOF8ifQ__",
+  "account_type": "real",
+  "take_profit_percent": 3.0,
+  "stop_loss_percent": -2.5,
+  "max_open_positions": 7,
+  "trade_amount_usd": 50.0,
+  "scan_interval_seconds": 60,
+  "watchlist": [
+    "BTC", "ETH", "SOL", "XRP", "ADA", "DOGE", "AVAX", "LINK",
+    "GOLD", "OIL", "SILVER", "NATGAS",
+    "SPX500", "NSDQ100", "GER40", "UK100",
+    "NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "AMD"
+  ]
+}
