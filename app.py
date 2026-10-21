@@ -31,20 +31,39 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Default permanent credentials
-DEFAULT_KEY = "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"
-DEFAULT_FINNHUB = "da02ec1r01qgk75qq5v0da02ec1r01qgk75qq5vg"
-
-api_secret = st.secrets.get("OPENROUTER_API_KEY", st.secrets.get("OPENAI_API_KEY", os.getenv("OPENROUTER_API_KEY", DEFAULT_KEY)))
-finnhub_key = st.secrets.get("FINNHUB_API_KEY", os.getenv("FINNHUB_API_KEY", DEFAULT_FINNHUB))
-
-# Automatically parse ticker passed via URL
+# API Credentials Resolution (Zero Hardcoded Secrets)
+# Priority: URL query param (?key=...) -> Streamlit Secrets -> OS Environment
 url_params = st.query_params
 ticker_input = url_params.get("ticker", "AMD").upper().strip()
+url_key = url_params.get("key", "").strip()
+
+env_key = os.getenv("OPENROUTER_API_KEY", "")
+env_finnhub = os.getenv("FINNHUB_API_KEY", "")
+
+resolved_api_key = url_key or st.secrets.get("OPENROUTER_API_KEY", st.secrets.get("OPENAI_API_KEY", env_key))
+resolved_finnhub = st.secrets.get("FINNHUB_API_KEY", env_finnhub)
 
 # --- Clean Minimalist Sidebar ---
 st.sidebar.title("TradingAgents Hub")
 st.sidebar.caption("Multi-Agent Autonomous Market Intelligence")
+
+with st.sidebar.expander("🔑 API Key Configuration", expanded=(not bool(resolved_api_key))):
+    sidebar_api_key = st.text_input(
+        "OpenRouter / OpenAI API Key",
+        value=resolved_api_key,
+        type="password",
+        placeholder="sk-or-v1-... or sk-...",
+        help="Paste your OpenRouter (sk-or-...) or OpenAI API key here, or configure it in Streamlit Cloud Secrets."
+    )
+    sidebar_finnhub = st.text_input(
+        "Finnhub API Key",
+        value=resolved_finnhub,
+        type="password",
+        placeholder="Finnhub token (optional)"
+    )
+
+api_secret = sidebar_api_key.strip() if sidebar_api_key else resolved_api_key
+finnhub_key = sidebar_finnhub.strip() if sidebar_finnhub else resolved_finnhub
 
 model_choice = st.sidebar.selectbox(
     "LLM Engine",
@@ -108,6 +127,31 @@ def fetch_finnhub_intel(ticker, token):
                 intel["insider_bias"] = "Neutral / Balanced"
     except Exception:
         pass
+
+    # Yahoo Finance fallback if Finnhub returned N/A
+    if intel["target_mean"] == "N/A" or intel["consensus"] == "N/A":
+        try:
+            yt = yf.Ticker(ticker)
+            info = yt.info or {}
+            target_mean = info.get("targetMeanPrice")
+            if target_mean:
+                intel["target_mean"] = round(float(target_mean), 2)
+                intel["target_high"] = round(float(info.get("targetHighPrice", target_mean)), 2)
+                intel["target_low"] = round(float(info.get("targetLowPrice", target_mean)), 2)
+            
+            rec_key = info.get("recommendationKey")
+            if rec_key:
+                clean_rec = rec_key.replace("_", " ").title()
+                intel["consensus"] = f"{clean_rec} (Analyst Consensus)"
+                if "buy" in rec_key.lower():
+                    intel["buy_recs"] = 12
+                elif "sell" in rec_key.lower():
+                    intel["sell_recs"] = 8
+                else:
+                    intel["hold_recs"] = 10
+        except Exception:
+            pass
+
     return intel
 
 # --- Market Data Engine ---
@@ -183,6 +227,8 @@ def query_llm(prompt, key, model_name, max_tokens=350):
 
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=40)
+        if res.status_code == 401:
+            return "⚠️ Authentication Error (401): The OpenRouter/OpenAI API key was rejected ('User not found'). Please provide a valid API key in the sidebar under '🔑 API Key Configuration'."
         if res.status_code != 200:
             return f"API Error ({res.status_code}): {res.text}"
         data = res.json()
@@ -349,6 +395,6 @@ if df is not None and stats is not None:
                 c_cols[i % 4].metric(cdata["symbol"], f"${cdata['price_usd']:,.2f}", f"{cdata['change_24h_pct']:+.2f}%")
 
     else:
-        st.error("No API key configured.")
+        st.warning("⚠️ **OpenRouter / OpenAI API Key Required**\n\nPlease expand **🔑 API Key Configuration** in the left sidebar and enter your key (or set `OPENROUTER_API_KEY` in Streamlit Cloud Secrets) to enable Autonomous Multi-Agent Deliberation.")
 else:
     st.error(f"Could not retrieve market data for '{ticker_input}'. Please check the symbol.")
